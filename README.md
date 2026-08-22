@@ -102,6 +102,21 @@ ledger entry. The lock makes read-check-write atomic, so two workers cannot both
 both debit `80`. The loser simply waits, then re-reads a balance of `20` and is rejected with
 `insufficient_funds`. This is why requirement 6 is deterministic rather than "usually right".
 
+```mermaid
+sequenceDiagram
+    participant A as Request A - debit 80
+    participant B as Request B - debit 80
+    participant DB as PostgreSQL
+    A->>DB: BEGIN, SELECT wallet FOR UPDATE
+    B->>DB: BEGIN, SELECT wallet FOR UPDATE
+    DB-->>A: balance = 100
+    Note over B,DB: B waits on the row lock
+    A->>DB: INSERT ledger row, balance = 20, COMMIT
+    DB-->>B: balance = 20 (re-read once the lock is released)
+    B->>DB: ROLLBACK
+    Note over B: 422 insufficient_funds
+```
+
 Alternatives considered:
 
 - *`F("balance") - amount` alone* - atomic as a write, but the "is there enough?" decision still
