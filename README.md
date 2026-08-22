@@ -92,7 +92,7 @@ CI روی پایتون ۳.۱۱ و ۳.۱۲ و ۳.۱۳ با PostgreSQL 16، به�
 
 | # | خواسته | محل اثبات |
 | --- | --- | --- |
-| ۱  ۲و  | API موجودی، تراکنش‌ها و کسر | `tests/test_api.py` |
+| و ۱  ۲  | API موجودی، تراکنش‌ها و کسر | `tests/test_api.py` |
 | ۳ | موجودی هرگز منفی نمی‌شود | `tests/test_negative_balance.py` |
 | ۴ | ارسال مجدد `request_id` کسر دوباره نمی‌کند | `tests/test_idempotency.py` |
 | ۵ | همان `request_id` با مبلغ متفاوت خطا می‌دهد | `tests/test_idempotency.py` |
