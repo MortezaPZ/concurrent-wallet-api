@@ -21,7 +21,7 @@ from django.db import connection, connections
 from django.test.utils import CaptureQueriesContext
 
 from wallets.exceptions import InsufficientFundsError, WalletError
-from wallets.models import Transaction, Wallet
+from wallets.models import INITIAL_BALANCE, Transaction, Wallet
 from wallets.services import DebitOutcome, debit
 
 pytestmark = pytest.mark.concurrency
@@ -69,6 +69,7 @@ def test_debit_locks_the_wallet_row(wallet):
 @pytest.mark.django_db(transaction=True)
 def test_two_simultaneous_debits_of_eighty_leave_exactly_one_winner():
     wallet = Wallet.objects.create()
+    assert wallet.balance == INITIAL_BALANCE == Decimal("100.00")
 
     results = _run_in_parallel(
         lambda index: _try_debit(wallet.id, "80.00", f"race-{index}"), count=2
@@ -89,6 +90,7 @@ def test_two_simultaneous_debits_of_eighty_leave_exactly_one_winner():
 @pytest.mark.django_db(transaction=True)
 def test_a_crowd_of_debits_can_never_oversell_the_balance():
     wallet = Wallet.objects.create()
+    assert wallet.balance == Decimal("100.00")
 
     results = _run_in_parallel(
         lambda index: _try_debit(wallet.id, "20.00", f"crowd-{index}"), count=12
@@ -115,6 +117,7 @@ def test_a_crowd_of_debits_can_never_oversell_the_balance():
 @pytest.mark.django_db(transaction=True)
 def test_the_same_request_id_sent_simultaneously_debits_only_once():
     wallet = Wallet.objects.create()
+    assert wallet.balance == Decimal("100.00")
 
     results = _run_in_parallel(lambda _index: _try_debit(wallet.id, "80.00", "same-key"), count=8)
 
@@ -130,6 +133,7 @@ def test_the_same_request_id_sent_simultaneously_debits_only_once():
 @pytest.mark.django_db(transaction=True)
 def test_simultaneous_debits_over_http_behave_the_same(live_server):
     wallet = Wallet.objects.create()
+    assert wallet.balance == Decimal("100.00")
     url = f"{live_server.url}/api/wallets/{wallet.id}/debit/"
 
     def call(index: int) -> tuple[int, dict]:
