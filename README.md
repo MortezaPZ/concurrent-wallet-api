@@ -2,27 +2,22 @@
 
 [![CI](https://github.com/MortezaPZ/concurrent-wallet-api/actions/workflows/ci.yml/badge.svg)](https://github.com/MortezaPZ/concurrent-wallet-api/actions/workflows/ci.yml)
 
-A small Django REST Framework service that debits a wallet **safely under concurrency** and
-**exactly once per `request_id`**. Correctness lives in the database: a `SELECT ... FOR UPDATE`
-row lock, a unique idempotency key, check constraints, and an append-only trigger.
+سرویس کوچکی با Django REST Framework که از یک کیف پول کسر می‌کند، به‌صورت امن در برابر هم‌زمانی و دقیقاً یک بار به ازای هر `request_id`. تضمین درستی در خود دیتابیس است: قفل سطری `SELECT ... FOR UPDATE`، کلید یکتای idempotency، قیدهای `CHECK` و یک تریگر append-only.
 
-Stack: Django 5.2, DRF 3.18, PostgreSQL 14/16, psycopg 3. Python 3.11 - 3.13.
+Django 5.2 · DRF 3.18 · PostgreSQL 14/16 · psycopg 3 · Python 3.11 تا 3.13
 
----
-
-## Quick start
+## اجرا
 
 ```bash
 cp .env.example .env
-docker compose up -d --wait postgres         # or point .env at your own PostgreSQL
-python -m venv .venv && . .venv/bin/activate # Windows: .venv\Scripts\activate
+docker compose up -d --wait postgres        # یا .env را به پستگرس خودتان وصل کنید
+python -m venv .venv && . .venv/bin/activate   # ویندوز: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-python manage.py migrate                     # also creates the demo wallet with balance 100
+python manage.py migrate                    # کیف پول نمونه با موجودی ۱۰۰ هم ساخته می‌شود
 python manage.py runserver
 ```
 
-`migrate` seeds one wallet with id `00000000-0000-0000-0000-000000000001` and balance `100.00`.
-Interactive API docs: <http://127.0.0.1:8000/api/docs/>
+پس از `migrate` یک کیف پول با شناسه `00000000-0000-0000-0000-000000000001` و موجودی `100.00` وجود دارد. مستندات تعاملی: <http://127.0.0.1:8000/api/docs/>
 
 ```bash
 W=00000000-0000-0000-0000-000000000001
@@ -34,47 +29,38 @@ curl -s -X POST localhost:8000/api/wallets/$W/debit/ \
 curl -s localhost:8000/api/wallets/$W/transactions/
 ```
 
-## Tests
+## تست
 
 ```bash
-pytest -v                 # whole suite
-pytest -v -m concurrency  # only the parallel-session scenarios
+pytest -v                 # کل سوئیت
+pytest -v -m concurrency  # فقط سناریوهای هم‌زمانی
 ```
 
-The suite **only runs on PostgreSQL** - there is no SQLite fallback anywhere in the settings,
-because `SELECT ... FOR UPDATE` is a no-op on SQLite and every concurrency guarantee here would
-silently become untested. `tests/test_concurrency.py` opens real parallel connections
-(`--reuse-db` is never used, tests are marked `transaction=True`) and one scenario drives the
-race through actual HTTP requests against a live server.
+تست‌ها **فقط روی PostgreSQL** اجرا می‌شوند؛ هیچ fallback ای به SQLite در تنظیمات وجود ندارد، چون `SELECT ... FOR UPDATE` روی SQLite بی‌اثر است و تمام تضمین‌های هم‌زمانی بی‌سروصدا تست‌نشده باقی می‌مانند. تست‌های هم‌زمانی کانکشن‌های موازی واقعی باز می‌کنند و یکی از سناریوها ریس را از طریق درخواست‌های HTTP واقعی روی یک سرور زنده اجرا می‌کند.
 
-CI runs lint, `makemigrations --check`, schema validation and the full suite on
-Python 3.11/3.12/3.13 against PostgreSQL 16, plus PostgreSQL 14.
+CI روی پایتون ۳.۱۱ و ۳.۱۲ و ۳.۱۳ با PostgreSQL 16، به‌علاوه PostgreSQL 14 اجرا می‌شود.
 
 ## API
 
-| Method | Path | Result |
+| متد | مسیر | نتیجه |
 | --- | --- | --- |
-| `GET` | `/api/wallets/` | List wallets |
-| `GET` | `/api/wallets/{id}/` | Balance and timestamps |
-| `GET` | `/api/wallets/{id}/transactions/` | That wallet's ledger, newest first, paginated |
-| `POST` | `/api/wallets/{id}/debit/` | Debit `{"amount", "request_id"}` |
-| `GET` | `/api/transactions/` | Whole ledger, `?wallet=<id>` to filter |
-| `GET` | `/api/transactions/{id}/` | One ledger entry |
-| `GET` | `/api/schema/`, `/api/docs/` | OpenAPI 3 schema and Swagger UI |
-| `GET` | `/healthz` | Liveness probe |
+| `GET` | `/api/wallets/{id}/` | موجودی |
+| `GET` | `/api/wallets/{id}/transactions/` | تراکنش‌های همان کیف پول، جدیدترین اول |
+| `POST` | `/api/wallets/{id}/debit/` | کسر با `{"amount", "request_id"}` |
+| `GET` | `/api/transactions/{id}/` | یک تراکنش |
 
-### Debit outcomes
+پاسخ‌های `debit`:
 
-| Status | Meaning |
+| کد | معنی |
 | --- | --- |
-| `201 Created` | Debit applied, balance reduced |
-| `200 OK` | Same `request_id` and amount replayed - **nothing debited again** (`Idempotent-Replay: true`) |
-| `400 Bad Request` | `validation_error` - malformed amount or `request_id` |
-| `404 Not Found` | `wallet_not_found` |
-| `409 Conflict` | `idempotency_key_conflict` - that `request_id` was used with a different amount |
-| `422 Unprocessable` | `insufficient_funds` - balance would go negative |
+| `201` | کسر انجام شد |
+| `200` | همان `request_id` با همان مبلغ دوباره ارسال شده؛ **چیزی دوباره کسر نمی‌شود** |
+| `400` | ورودی نامعتبر |
+| `404` | کیف پول یافت نشد |
+| `409` | همان `request_id` با مبلغ متفاوت |
+| `422` | موجودی کافی نیست |
 
-Every error uses one envelope:
+قالب خطاها یکسان است:
 
 ```json
 {"error": {"code": "insufficient_funds",
@@ -82,111 +68,35 @@ Every error uses one envelope:
            "details": {"balance": "20.00", "requested": "80.00", "shortfall": "60.00"}}}
 ```
 
-## Requirement coverage
+## تصمیم‌های فنی
 
-| # | Requirement | Where it is proven |
+**قفل بدبینانه روی ردیف، نه منطق در پایتون.** هر کسر داخل یک تراکنش دیتابیس شروع می‌شود و اول `SELECT ... FOR UPDATE` روی ردیف کیف پول می‌گیرد، بعد موجودی را می‌خواند، تصمیم می‌گیرد، می‌نویسد و ردیف دفتر را ثبت می‌کند. این قفل، دنباله «خواندن ← بررسی ← نوشتن» را اتمیک می‌کند، پس دو درخواست هم‌زمان نمی‌توانند هر دو موجودی ۱۰۰ را ببینند و هر دو ۸۰ کسر کنند. بازنده منتظر می‌ماند، بعد موجودی ۲۰ را می‌خواند و با `insufficient_funds` رد می‌شود. به همین دلیل نتیجه قطعی است، نه «معمولاً درست».
+
+جایگزین‌ها بررسی شدند: `F("balance") - amount` نوشتن را اتمیک می‌کند ولی خودِ تصمیمِ «آیا کافی است؟» همچنان ریس دارد؛ قفل خوش‌بینانه نیاز به retry سمت کلاینت دارد و رد شدنِ قطعی را احتمالی می‌کند؛ ایزولیشن `SERIALIZABLE` درست است اما خطای serialization را به همه فراخوان‌ها تحمیل می‌کند، در حالی که `READ COMMITTED` به‌علاوه قفل صریح چیزی برای retry باقی نمی‌گذارد.
+
+**Idempotency یک قید دیتابیسی است، نه کش.** ضمانت واقعی `UNIQUE (wallet_id, request_id)` است؛ جست‌وجوی داخل تراکنش فقط برای این است که تکرار یک `200` تمیز بگیرد به جای `IntegrityError`. کلید به ازای هر کیف پول scope شده است. تکرار با مبلغ متفاوت **باگ سمت کلاینت** است، پس `409` برمی‌گردد نه اینکه بی‌صدا نادیده گرفته شود. کسری که رد شده باشد کلید را مصرف نمی‌کند و همان `request_id` بعداً قابل استفاده است.
+
+**پول همه‌جا `Decimal(18, 2)` است**، هرگز float. ورودی به‌صورت رشته پارس می‌شود و حداکثر دو رقم اعشار می‌گیرد.
+
+**دفتر تراکنش‌ها append-only است و سه لایه از آن محافظت می‌کند:** متدهای نوشتن اصلاً route نشده‌اند (پس `405` برمی‌گردانند)، `Transaction.save()/delete()` روی ردیف موجود خطا می‌دهند، و یک تریگر `BEFORE UPDATE OR DELETE` در پستگرس هر مسیر دیگری را می‌بندد — SQL خام، `.update()`، یا یک سشن psql. هر ردیف `balance_after` را نگه می‌دارد.
+
+**دفتر به یک ترتیب کلی نیاز دارد و timestamp آن را نمی‌دهد.** رزولوشن ساعت باعث تساوی می‌شود (روی ویندوز چند ردیف در یک تیک ~۱۵ میلی‌ثانیه‌ای می‌افتند) و UUID تصادفی tie-breaker نیست. پس هر ردیف یک `sequence` از یک sequence پستگرس می‌گیرد و ترتیب بر اساس آن است؛ چون درج‌ها زیر قفل ردیف کیف پول انجام می‌شوند، ترتیب درج همان ترتیب commit است.
+
+**قیدها در schema هستند.** `balance >= 0`، `amount > 0` و `balance_after >= 0` هر سه `CHECK` هستند تا حتی باگ کد آینده هم نتواند وضعیت ناممکن ذخیره کند. کلید خارجی کیف پول `PROTECT` است تا تاریخچه بی‌صاحب نماند.
+
+**`ATOMIC_REQUESTS` استفاده نشده** چون قفل ردیف را تا پایان کل درخواست نگه می‌داشت؛ قفل به‌صورت صریح و تا حد ممکن دیرتر و کوتاه‌تر گرفته می‌شود.
+
+احراز هویت، درگاه پرداخت، پنل مدیریت، رابط کاربری و استقرار خارج از محدوده این تست هستند؛ به همین دلیل `django.contrib.auth` و `sessions` و `admin` اصلاً نصب نشده‌اند.
+
+## پوشش خواسته‌ها
+
+| # | خواسته | محل اثبات |
 | --- | --- | --- |
-| 1 | Balance and transaction APIs | `tests/test_api.py` |
-| 2 | Debit with `amount` + `request_id` | `tests/test_api.py` |
-| 3 | Balance never goes negative | `tests/test_negative_balance.py` |
-| 4 | Replaying a `request_id` does not debit twice | `tests/test_idempotency.py` |
-| 5 | Same `request_id`, different amount -> error | `tests/test_idempotency.py` |
-| 6 | Two simultaneous debits of 80 -> exactly one succeeds | `tests/test_concurrency.py` |
-| 7 | Recorded transactions cannot be edited or deleted | `tests/test_immutability.py` |
+| ۱ و ۲ | API موجودی، تراکنش‌ها و کسر | `tests/test_api.py` |
+| ۳ | موجودی هرگز منفی نمی‌شود | `tests/test_negative_balance.py` |
+| ۴ | ارسال مجدد `request_id` کسر دوباره نمی‌کند | `tests/test_idempotency.py` |
+| ۵ | همان `request_id` با مبلغ متفاوت خطا می‌دهد | `tests/test_idempotency.py` |
+| ۶ | دو کسر هم‌زمان ۸۰ واحدی، دقیقاً یکی موفق | `tests/test_concurrency.py` |
+| ۷ | تراکنش ثبت‌شده قابل ویرایش یا حذف نیست | `tests/test_immutability.py` |
 
-## Technical decisions
-
-**Pessimistic row lock, not application logic.** `services.debit()` opens one transaction, takes
-`SELECT ... FOR UPDATE` on the wallet row, then reads the balance, decides, writes, and appends the
-ledger entry. The lock makes read-check-write atomic, so two workers cannot both observe `100` and
-both debit `80`. The loser simply waits, then re-reads a balance of `20` and is rejected with
-`insufficient_funds`. This is why requirement 6 is deterministic rather than "usually right".
-
-```mermaid
-sequenceDiagram
-    participant A as Request A - debit 80
-    participant B as Request B - debit 80
-    participant DB as PostgreSQL
-    A->>DB: BEGIN, SELECT wallet FOR UPDATE
-    B->>DB: BEGIN, SELECT wallet FOR UPDATE
-    DB-->>A: balance = 100
-    Note over B,DB: B waits on the row lock
-    A->>DB: INSERT ledger row, balance = 20, COMMIT
-    DB-->>B: balance = 20 (re-read once the lock is released)
-    B->>DB: ROLLBACK
-    Note over B: 422 insufficient_funds
-```
-
-Alternatives considered:
-
-- *`F("balance") - amount` alone* - atomic as a write, but the "is there enough?" decision still
-  races. It would need a `filter(balance__gte=amount).update(...)` compare-and-set plus a retry
-  loop, and it cannot cover the "insert the ledger row too" half of the operation.
-- *Optimistic locking / version column* - needs client retries and turns a guaranteed rejection
-  into a probabilistic one.
-- *`SERIALIZABLE` isolation* - correct, but pushes serialization failures onto every caller. With
-  `READ COMMITTED` + an explicit row lock there is nothing to retry, and the lock window is exactly
-  as long as one debit.
-- *Redis / advisory locks* - another moving part that can disagree with the durable state. The row
-  that holds the money is the right thing to lock.
-
-**Idempotency is a database constraint, not a cache.** `UNIQUE (wallet_id, request_id)` is the real
-guarantee; the in-transaction lookup is just how a replay gets a friendly `200` instead of an
-`IntegrityError`. The service still catches `IntegrityError` as a second line of defence. Keys are
-scoped per wallet, so two wallets may legitimately use the same `order-1`. A replay with a
-different amount is a **client bug**, so it is reported as `409` rather than silently ignored, and a
-*rejected* debit consumes nothing - the same `request_id` can be retried once funds arrive.
-
-**Money is `Decimal(18, 2)` everywhere** - never float. Input is parsed as a string, quantized once
-in the service, and validated to at most 2 decimal places.
-
-**The ledger is append-only, defended three times**: DRF exposes read-only viewsets (write verbs
-are not routed at all, so they return `405`), `Transaction.save()/delete()` raise on any modification
-of an existing row, and a PostgreSQL `BEFORE UPDATE OR DELETE` trigger rejects anything that reaches
-the table by another path - raw SQL, `.update()`, a future admin, or a psql session. Each entry
-stores `balance_after`, so the ledger reconstructs history without replaying arithmetic.
-
-**A ledger needs a total order, and timestamps do not give one.** Clock resolution ties are
-real - on Windows several entries land in the same ~15 ms tick - and a random UUID is not a
-tie-breaker, so `ORDER BY created_at DESC, id DESC` returns tied rows in arbitrary order. Entries
-therefore carry a `sequence` taken from a PostgreSQL sequence and are ordered by it. Because inserts
-for a wallet happen under that wallet's row lock, insertion order is also commit order.
-`test_ledger_order_survives_identical_timestamps` is the regression test.
-
-**Constraints belong in the schema.** `balance >= 0`, `amount > 0` and `balance_after >= 0` are
-`CHECK` constraints, so even a bug in future code cannot persist an impossible state. The wallet FK
-is `PROTECT`: history is never orphaned.
-
-**Layering.** Views validate and translate; `services.py` owns the transaction boundary and the
-domain rules; models own invariants. The concurrency tests call the service directly *and* over
-HTTP, which shows the guarantee is in the domain layer, not in a view.
-
-**Not used: `ATOMIC_REQUESTS`.** Wrapping whole requests would hold the row lock for the lifetime of
-the request, including serialization. The lock is taken explicitly, as late and as briefly as
-possible.
-
-**Out of scope** (per the brief): authentication, payment gateway, admin panel, UI, deployment.
-Because of that, `django.contrib.auth`, `sessions` and `admin` are not installed at all - a smaller
-attack surface and a faster test run, rather than a default project with dead apps in it.
-
-### What would come next in production
-
-Credit/refund operations and a transfer endpoint reusing the same lock ordering; an outbox table for
-downstream events; `statement_timeout` and lock-wait metrics; per-key rate limiting; and partitioning
-or archiving the ledger once it grows.
-
-## Layout
-
-```
-config/          settings, urls, wsgi/asgi
-wallets/
-  models.py      Wallet, Transaction (+ constraints, append-only guards)
-  services.py    debit(): the transaction boundary and the row lock
-  serializers.py request/response contracts and input validation
-  views.py       read-only viewsets + the debit action
-  exceptions.py  domain errors -> one HTTP error envelope
-  seed.py        the demo wallet, shared by migration and CLI
-  migrations/    schema, append-only trigger, demo wallet
-tests/           one file per requirement group
-.github/workflows/ci.yml
-```
+متغیرهای محیطی در `.env.example` آمده‌اند و هیچ مقدار محرمانه‌ای در مخزن نیست.
