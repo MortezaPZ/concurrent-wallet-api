@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Ruff (lint)
+        run: ruff check --output-format=github .
+      - name: Ruff (format)
+        run: ruff format --check .
+      - name: OpenAPI schema is up to date
+        run: |
+          python manage.py spectacular --fail-on-warn --file openapi.yaml
+          git diff --exit-code openapi.yaml
+
+  test:
+    name: Tests (py${{ matrix.python-version }} / pg${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        postgres: ["16"]
+        include:
+          - python-version: "3.13"
+            postgres: "14"
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_DB: wallet
+          POSTGRES_USER: wallet
+          POSTGRES_PASSWORD: wallet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wallet"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DJANGO_SECRET_KEY: ci-only-key-not-a-secret-8Qw3rTz9LmVb2XpNc7Hf4KdJsY6Ag1Ue
+      DJANGO_DEBUG: "false"
+      POSTGRES_DB: wallet
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Django system checks
+        run: python manage.py check --deploy --fail-level ERROR
+
+      - name: Verify models and migrations are in sync
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations
+        run: python manage.py migrate
+
+      - name: Functional tests
+        run: pytest -v -m "not concurrency" --cov --cov-report=term-missing
+
+      - name: Concurrency tests (real parallel PostgreSQL sessions)
+        run: pytest -v -m concurrency --cov --cov-append --cov-report=term-missing

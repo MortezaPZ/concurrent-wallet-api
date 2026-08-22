@@ -1,0 +1,341 @@
+openapi: 3.0.3
+info:
+  title: Concurrent Wallet API
+  version: 1.0.0
+  description: Idempotent, race-safe wallet debits backed by PostgreSQL row locks.
+paths:
+  /api/transactions/:
+    get:
+      operationId: transactions_list
+      description: Append-only ledger. Write methods are not routed at all.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: wallet
+        schema:
+          type: string
+        description: Filter the ledger by wallet id.
+      tags:
+      - transactions
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTransactionList'
+          description: ''
+  /api/transactions/{id}/:
+    get:
+      operationId: transactions_retrieve
+      description: Append-only ledger. Write methods are not routed at all.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+        required: true
+      tags:
+      - transactions
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+          description: ''
+  /api/wallets/:
+    get:
+      operationId: wallets_list
+      description: Read the wallet, read its ledger, and debit it idempotently.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - wallets
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedWalletList'
+          description: ''
+  /api/wallets/{id}/:
+    get:
+      operationId: wallets_retrieve
+      description: Read the wallet, read its ledger, and debit it idempotently.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+        required: true
+      tags:
+      - wallets
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+          description: ''
+  /api/wallets/{id}/debit/:
+    post:
+      operationId: wallets_debit_create
+      description: Read the wallet, read its ledger, and debit it idempotently.
+      summary: Debit the wallet exactly once per request_id.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+        required: true
+      tags:
+      - wallets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebitRequestRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DebitResponse'
+          description: Debit applied.
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DebitResponse'
+          description: Idempotent replay; balance unchanged.
+        '400':
+          description: Invalid payload.
+        '404':
+          description: Wallet not found.
+        '409':
+          description: request_id reused with a different amount.
+        '422':
+          description: Insufficient funds.
+  /api/wallets/{id}/transactions/:
+    get:
+      operationId: wallets_transactions_list
+      description: Read the wallet, read its ledger, and debit it idempotently.
+      summary: List the transactions of a wallet, newest first.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - wallets
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTransactionList'
+          description: ''
+components:
+  schemas:
+    DebitRequestRequest:
+      type: object
+      properties:
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          description: Positive amount to debit, at most 2 decimal places.
+        request_id:
+          type: string
+          minLength: 1
+          description: Idempotency key. Replaying it never debits twice.
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$
+          maxLength: 64
+      required:
+      - amount
+      - request_id
+    DebitResponse:
+      type: object
+      properties:
+        replayed:
+          type: boolean
+          description: True when the request_id was already applied earlier.
+        balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          description: Wallet balance after the debit.
+        transaction:
+          $ref: '#/components/schemas/Transaction'
+      required:
+      - balance
+      - replayed
+      - transaction
+    KindEnum:
+      enum:
+      - DEBIT
+      type: string
+      description: '* `DEBIT` - Debit'
+    PaginatedTransactionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+    PaginatedWalletList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Wallet'
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        wallet:
+          type: string
+          format: uuid
+          readOnly: true
+        request_id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/KindEnum'
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          readOnly: true
+        balance_after:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - balance_after
+      - created_at
+      - id
+      - kind
+      - request_id
+      - wallet
+    Wallet:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - balance
+      - created_at
+      - id
+      - updated_at
