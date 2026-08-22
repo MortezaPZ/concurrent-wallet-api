@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Func, Value
 
 MONEY = {
     "max_digits": settings.WALLET_MAX_DIGITS,
@@ -13,6 +14,8 @@ MONEY = {
 }
 
 INITIAL_BALANCE = Decimal("100.00")
+
+LEDGER_SEQUENCE = "wallet_transaction_sequence"
 
 
 class ImmutableTransactionError(RuntimeError):
@@ -50,6 +53,15 @@ class Transaction(models.Model):
     """An append-only ledger entry. Never updated, never deleted."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # A ledger needs a total order. Timestamps cannot provide one: clock
+    # resolution ties are real (~15ms on Windows), and a random UUID is no
+    # tie-breaker. A database sequence orders entries by insertion, and the
+    # wallet row lock makes that the commit order too.
+    sequence = models.BigIntegerField(
+        editable=False,
+        unique=True,
+        db_default=Func(Value(LEDGER_SEQUENCE), function="nextval"),
+    )
     wallet = models.ForeignKey(Wallet, on_delete=models.PROTECT, related_name="transactions")
     request_id = models.CharField(max_length=64)
     kind = models.CharField(
@@ -61,7 +73,7 @@ class Transaction(models.Model):
 
     class Meta:
         db_table = "wallet_transaction"
-        ordering = ["-created_at", "-id"]
+        ordering = ["-sequence"]
         constraints = [
             models.UniqueConstraint(
                 fields=["wallet", "request_id"],
@@ -76,7 +88,7 @@ class Transaction(models.Model):
                 name="wallet_transaction_balance_after_non_negative",
             ),
         ]
-        indexes = [models.Index(fields=["wallet", "-created_at"])]
+        indexes = [models.Index(fields=["wallet", "-sequence"])]
 
     def __str__(self) -> str:
         return f"{self.kind} {self.amount} ({self.request_id})"

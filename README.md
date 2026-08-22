@@ -146,6 +146,13 @@ of an existing row, and a PostgreSQL `BEFORE UPDATE OR DELETE` trigger rejects a
 the table by another path - raw SQL, `.update()`, a future admin, or a psql session. Each entry
 stores `balance_after`, so the ledger reconstructs history without replaying arithmetic.
 
+**A ledger needs a total order, and timestamps do not give one.** Clock resolution ties are
+real - on Windows several entries land in the same ~15 ms tick - and a random UUID is not a
+tie-breaker, so `ORDER BY created_at DESC, id DESC` returns tied rows in arbitrary order. Entries
+therefore carry a `sequence` taken from a PostgreSQL sequence and are ordered by it. Because inserts
+for a wallet happen under that wallet's row lock, insertion order is also commit order.
+`test_ledger_order_survives_identical_timestamps` is the regression test.
+
 **Constraints belong in the schema.** `balance >= 0`, `amount > 0` and `balance_after >= 0` are
 `CHECK` constraints, so even a bug in future code cannot persist an impossible state. The wallet FK
 is `PROTECT`: history is never orphaned.

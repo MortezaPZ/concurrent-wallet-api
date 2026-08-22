@@ -86,6 +86,26 @@ def test_transactions_endpoint_lists_newest_first(api, wallet, debit_url):
     assert [row["balance_after"] for row in body["results"]] == ["70.00", "90.00"]
 
 
+def test_ledger_order_survives_identical_timestamps(api, wallet, debit_url):
+    """Entries written inside one clock tick must still come back in order."""
+    written = [f"tick-{index:02d}" for index in range(12)]
+    for request_id in written:
+        api.post(debit_url, debit_payload("1.00", request_id))
+
+    response = api.get(reverse("wallet-transactions", args=[wallet.id]))
+    returned = [row["request_id"] for row in response.json()["results"]]
+
+    assert returned == list(reversed(written))
+
+    sequences = list(
+        Transaction.objects.filter(wallet=wallet)
+        .order_by("sequence")
+        .values_list("sequence", flat=True)
+    )
+    assert sequences == sorted(sequences)
+    assert len(set(sequences)) == len(written)
+
+
 def test_transaction_list_can_be_filtered_by_wallet(api, wallet, other_wallet, debit_url):
     api.post(debit_url, debit_payload("10.00", "req-a"))
     api.post(reverse("wallet-debit", args=[other_wallet.id]), debit_payload("5.00", "req-a"))
