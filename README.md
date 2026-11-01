@@ -104,3 +104,10 @@ CI runs Python 3.11, 3.12, and 3.13 against PostgreSQL 16, plus one job on Postg
 ## Limitations
 
 No authentication, payment gateway, admin, or deployment story. Environment variables are listed in `.env.example`. No secret belongs in the repository.
+
+## Folder guides
+
+- [`.github/`](<.github/README.md>)
+- [`config/`](<config/README.md>)
+- [`tests/`](<tests/README.md>)
+- [`wallets/`](<wallets/README.md>)
